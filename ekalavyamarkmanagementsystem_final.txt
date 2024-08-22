@@ -1,0 +1,351 @@
+ import tkinter as tk
+from tkinter import ttk, messagebox, scrolledtext
+import sqlite3
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+import random
+import smtplib
+from email.mime.text import MIMEText
+
+# Connect to SQLite database
+conn = sqlite3.connect('student_data.db')
+cursor = conn.cursor()
+
+# Function to create student table if not exists
+def create_table():
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS students59 (
+            roll_number INTEGER PRIMARY KEY,
+            name TEXT NOT NULL,
+            DAA REAL,
+            IWT REAL,
+            Python REAL,
+            SEPD REAL,
+            total_marks REAL,
+            grade TEXT
+        )
+    ''')
+    conn.commit()
+
+# Function to add marks securely
+def add_marks():
+    pin = pin_entry.get()
+    if pin != '1234':  # Replace '1234' with your actual secure PIN
+        messagebox.showerror('Error', 'Enter correct 4 digit pin!')
+        return
+    
+    name = name_entry.get()
+    roll_number = int(roll_entry.get())
+    daa_marks = float(daa_entry.get())
+    iwt_marks = float(iwt_entry.get())
+    python_marks = float(python_entry.get())
+    sepd_marks = float(sepd_entry.get())
+    
+    total_marks = daa_marks + iwt_marks + python_marks + sepd_marks
+    grade = calculate_grade(total_marks)
+    
+    # Insert or replace student data in SQLite table
+    cursor.execute('''
+        INSERT OR REPLACE INTO students59 (roll_number, name, DAA, IWT, Python, SEPD, total_marks, grade)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (roll_number, name, daa_marks, iwt_marks, python_marks, sepd_marks, total_marks, grade))
+    
+    conn.commit()
+    messagebox.showinfo('Success', 'Marks added successfully!')
+    fetch_student_data()
+
+# Function to fetch all student data from SQLite
+def fetch_student_data():
+    try:
+        cursor.execute('SELECT * FROM students59')
+        data = cursor.fetchall()
+        show_data_dialog(data)
+    except sqlite3.Error as e:
+        messagebox.showwarning('Warning', f'Error fetching data: {e}')
+
+# Function to fetch and display individual student data based on roll number
+def fetch_individual_data():
+    roll_number = int(roll_view_entry.get())
+    try:
+        cursor.execute('SELECT * FROM students59 WHERE roll_number = ?', (roll_number,))
+        data = cursor.fetchone()
+        
+        if data:
+            calculate_marks(data)
+            show_individual_data_dialog(data)
+        else:
+            messagebox.showerror('Error', 'Student not found!')
+    
+    except sqlite3.Error as e:
+        messagebox.showerror('Error', f'Error fetching data: {e}')
+
+# Function to calculate total marks and grade
+def calculate_marks(data):
+    daa_marks = data[2]
+    iwt_marks = data[3]
+    python_marks = data[4]
+    sepd_marks = data[5]
+    
+    total_marks = daa_marks + iwt_marks + python_marks + sepd_marks
+    grade = calculate_grade(total_marks)
+    
+    cursor.execute('''
+        UPDATE students59
+        SET total_marks = ?, grade = ?
+        WHERE roll_number = ?
+    ''', (total_marks, grade, data[0]))
+    
+    conn.commit()
+
+# Function to calculate grade based on total marks
+def calculate_grade(total_marks):
+    if total_marks >= 360:
+        return 'A'
+    elif total_marks >= 300:
+        return 'B'
+    elif total_marks >= 240:
+        return 'C'
+    elif total_marks >= 180:
+        return 'D'
+    else:
+        return 'F'
+
+# Function to generate PDF with formatted table and headings
+def generate_pdf():
+    user_otp = otp_entry.get()
+    
+    if not verify_otp(user_otp):
+        messagebox.showerror('Error', 'Invalid OTP!')
+        return
+
+    roll_number = int(roll_pdf_entry.get())
+    
+    try:
+        cursor.execute('SELECT * FROM students59 WHERE roll_number = ?', (roll_number,))
+        data = cursor.fetchone()
+        
+        if data:
+            pdf_filename = f'student_marksheet_{data[0]}.pdf'
+            
+            # Define styles for headings
+            styles = getSampleStyleSheet()
+            TitleStyle = ParagraphStyle(
+                name='TitleStyle',
+                parent=styles['Title'],
+                fontSize=18,
+                alignment=1,  # Center align
+                spaceAfter=12
+            )
+            SubTitleStyle = ParagraphStyle(
+                name='SubTitleStyle',
+                parent=styles['Heading2'],
+                fontSize=14,
+                alignment=1,  # Center align
+                spaceAfter=12
+            )
+            DisclaimerStyle = ParagraphStyle(
+                name='DisclaimerStyle',
+                parent=styles['Normal'],
+                fontSize=10,
+                alignment=1,  # Center align
+                spaceBefore=12,
+                textColor=colors.red
+            )
+            
+            # Create a PDF document
+            doc = SimpleDocTemplate(pdf_filename, pagesize=letter)
+            
+            # Create an image object for the logo
+            logo = Image("D:\Python_project\ekalavya.jpeg", width=50, height=50)  # Update with the actual path to your logo
+            logo.hAlign = 'LEFT'
+            
+            # Data for the table
+            table_data = [
+                ['Name', data[1]],
+                ['Roll Number', data[0]],
+                ['DAA Marks', data[2]],
+                ['IWT Marks', data[3]],
+                ['Python Marks', data[4]],
+                ['SEPD Marks', data[5]],
+                ['Total Marks', data[6]],
+                ['Grade', data[7]]
+            ]
+            
+            # Create a Table with the data
+            table = Table(table_data)
+            
+            # Add TableStyle to the Table for formatting
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 14),
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 1), (-1, -1), 12)
+            ]))
+            
+            # Build the PDF with the heading, subheading, logo, and table
+            content = []
+            content.append(logo)  # Add the logo to the content
+            content.append(Paragraph('EKALAVYA CLASSES, KAMAKHYANAGAR', TitleStyle))
+            content.append(Paragraph('Academic Marks', SubTitleStyle))
+            content.append(table)
+            content.append(Paragraph('Disclaimer: \nThis is a computer generated pdf, so no need for authentication.', DisclaimerStyle))
+            doc.build(content)
+            
+            messagebox.showinfo('Success', f'PDF generated: {pdf_filename}')
+        else:
+            messagebox.showerror('Error', 'Student not found!')
+    
+    except sqlite3.Error as e:
+        messagebox.showerror('Error', f'Error fetching data: {e}')
+
+# Function to send OTP
+def send_otp(email_address):
+    global otp_code
+    otp_code = str(random.randint(100000, 999999))  # Generate a 6-digit OTP
+    
+    # Email configuration
+    smtp_server = 'smtp.gmail.com'
+    smtp_port = 587
+    smtp_user = 'sohankumarmohapatra55@gmail.com'  # Replace with your email
+    smtp_password = 'mwie uqcb uind qbbu'  # Replace with your email password
+    
+    # Create the email content
+    subject = 'Your OTP Code'
+    body = f'Your OTP code is {otp_code}.'
+    msg = MIMEText(body)
+    msg['Subject'] = subject
+    msg['From'] = smtp_user
+    msg['To'] = email_address
+    
+    # Send the email
+    try:
+        with smtplib.SMTP(smtp_server, smtp_port) as server:
+            server.starttls()
+            server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_user, email_address, msg.as_string())
+        messagebox.showinfo('Success', 'OTP sent to your email!')
+    except Exception as e:
+        messagebox.showerror('Error', f'Failed to send OTP: {e}')
+
+# Function to verify OTP
+def verify_otp(user_otp):
+    return user_otp == otp_code
+
+# Function to show data in a dialog
+def show_data_dialog(data):
+    data_window = tk.Toplevel(root)
+    data_window.title('All Students Data')
+    
+    text_area = scrolledtext.ScrolledText(data_window, width=80, height=20, bg='black', fg='#90EE90', insertbackground='#90EE90')
+    text_area.pack(padx=10, pady=10)
+    
+    for row in data:
+        text_area.insert(tk.END, f'Roll Number: {row[0]}, Name: {row[1]}, DAA: {row[2]}, IWT: {row[3]}, Python: {row[4]}, SEPD: {row[5]}, Total Marks: {row[6]}, Grade: {row[7]}\n')
+    
+    text_area.config(state=tk.DISABLED)
+
+# Function to show individual data in a dialog
+def show_individual_data_dialog(data):
+    individual_window = tk.Toplevel(root)
+    individual_window.title('Student Data')
+    
+    text_area = scrolledtext.ScrolledText(individual_window, width=40, height=10, bg='black', fg='#90EE90', insertbackground='#90EE90')
+    text_area.pack(padx=10, pady=10)
+    
+    text_area.insert(tk.END, f'Roll Number: {data[0]}\n')
+    text_area.insert(tk.END, f'Name: {data[1]}\n')
+    text_area.insert(tk.END, f'DAA Marks: {data[2]}\n')
+    text_area.insert(tk.END, f'IWT Marks: {data[3]}\n')
+    text_area.insert(tk.END, f'Python Marks: {data[4]}\n')
+    text_area.insert(tk.END, f'SEPD Marks: {data[5]}\n')
+    text_area.insert(tk.END, f'Total Marks: {data[6]}\n')
+    text_area.insert(tk.END, f'Grade: {data[7]}\n')
+    
+    text_area.config(state=tk.DISABLED)
+
+# Create the main window
+root = tk.Tk()
+root.title('Student Marks Management System')
+
+# Set the theme colors
+root.configure(bg='black')
+
+# Entry fields for adding marks
+ttk.Label(root, text='Name:', background='black', foreground='#90EE90').grid(column=0, row=0, padx=10, pady=5)
+name_entry = ttk.Entry(root)
+name_entry.grid(column=1, row=0, padx=10, pady=5)
+
+ttk.Label(root, text='Roll Number:', background='black', foreground='#90EE90').grid(column=0, row=1, padx=10, pady=5)
+roll_entry = ttk.Entry(root)
+roll_entry.grid(column=1, row=1, padx=10, pady=5)
+
+ttk.Label(root, text='DAA Marks:', background='black', foreground='#90EE90').grid(column=0, row=2, padx=10, pady=5)
+daa_entry = ttk.Entry(root)
+daa_entry.grid(column=1, row=2, padx=10, pady=5)
+
+ttk.Label(root, text='IWT Marks:', background='black', foreground='#90EE90').grid(column=0, row=3, padx=10, pady=5)
+iwt_entry = ttk.Entry(root)
+iwt_entry.grid(column=1, row=3, padx=10, pady=5)
+
+ttk.Label(root, text='Python Marks:', background='black', foreground='#90EE90').grid(column=0, row=4, padx=10, pady=5)
+python_entry = ttk.Entry(root)
+python_entry.grid(column=1, row=4, padx=10, pady=5)
+
+ttk.Label(root, text='SEPD Marks:', background='black', foreground='#90EE90').grid(column=0, row=5, padx=10, pady=5)
+sepd_entry = ttk.Entry(root)
+sepd_entry.grid(column=1, row=5, padx=10, pady=5)
+
+ttk.Label(root, text='Enter PIN:', background='black', foreground='#90EE90').grid(column=0, row=6, padx=10, pady=5)
+pin_entry = ttk.Entry(root, show='*')
+pin_entry.grid(column=1, row=6, padx=10, pady=5)
+
+add_button = ttk.Button(root, text='Add Marks', command=add_marks)
+add_button.grid(column=0, row=7, columnspan=2, padx=10, pady=5)
+
+# Entry fields for fetching student data
+ttk.Label(root, text='Roll Number to View:', background='black', foreground='#90EE90').grid(column=0, row=8, padx=10, pady=5)
+roll_view_entry = ttk.Entry(root)
+roll_view_entry.grid(column=1, row=8, padx=10, pady=5)
+
+fetch_button = ttk.Button(root, text='Fetch Data', command=fetch_individual_data)
+fetch_button.grid(column=0, row=9, columnspan=2, padx=10, pady=5)
+
+# Button to fetch all student data
+fetch_all_button = ttk.Button(root, text='Fetch All Data', command=fetch_student_data)
+fetch_all_button.grid(column=0, row=10, columnspan=2, padx=10, pady=5)
+
+# Entry fields for OTP generation and PDF generation
+ttk.Label(root, text='Enter Email for OTP:', background='black', foreground='#90EE90').grid(column=0, row=11, padx=10, pady=5)
+otp_email_entry = ttk.Entry(root)
+otp_email_entry.grid(column=1, row=11, padx=10, pady=5)
+
+send_otp_button = ttk.Button(root, text='Send OTP', command=lambda: send_otp(otp_email_entry.get()))
+send_otp_button.grid(column=0, row=12, columnspan=2, padx=10, pady=5)
+
+ttk.Label(root, text='Enter OTP:', background='black', foreground='#90EE90').grid(column=0, row=13, padx=10, pady=5)
+otp_entry = ttk.Entry(root)
+otp_entry.grid(column=1, row=13, padx=10, pady=5)
+
+ttk.Label(root, text='Roll Number for PDF:', background='black', foreground='#90EE90').grid(column=0, row=14, padx=10, pady=5)
+roll_pdf_entry = ttk.Entry(root)
+roll_pdf_entry.grid(column=1, row=14, padx=10, pady=5)
+
+pdf_button = ttk.Button(root, text='Generate PDF', command=generate_pdf)
+pdf_button.grid(column=0, row=15, columnspan=2, padx=10, pady=5)
+
+# Create the table if it doesn't exist
+create_table()
+
+# Start the Tkinter main loop
+root.mainloop()
+
+# Close the database connection when the application is closed
+conn.close()
